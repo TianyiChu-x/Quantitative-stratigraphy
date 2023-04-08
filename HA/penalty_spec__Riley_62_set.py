@@ -2,8 +2,8 @@ import numpy as np
 
 
 def produce_list():
-    n_biostrat = 4522
-    # n_biostrat = 62
+    # n_biostrat = 4522
+    n_biostrat = 62
     biostrat = np.arange(1, n_biostrat + 1)
 
     n_pmag = 0
