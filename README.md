@@ -1,2 +1,2 @@
 # Quantitative-stratigraphy
-CONOP &amp; HA
+Horizon annealing
