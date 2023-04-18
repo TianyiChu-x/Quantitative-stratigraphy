@@ -6,7 +6,7 @@ from ColumnRangeExtension import NetRangeExtension, ftransitions2
 from timer import Timer
 
 
-def HorizonAnneal(dataframe, pen_str, nouter=400, ninner=100, temperature=5, cooling=0.9):
+def HorizonAnneal(dataframe, pen_str, nouter=400, ninner=100, temperature=5, cooling=0.5):
     global pcv3, j, pmove, psec
     d3 = dataframe.values  # 取出dataframe中的数值 -> ndarray
     columns = dataframe.columns  # 取出表头留作备用
@@ -205,4 +205,4 @@ def HorizonAnneal(dataframe, pen_str, nouter=400, ninner=100, temperature=5, coo
                                                                movetrack[3], movetrack[4]))
     print("gaprange:", gaprange)
 
-    return y
+    return pd3
