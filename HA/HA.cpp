@@ -1,379 +1,389 @@
-#include <fstream>
 #include <iostream>
+#include <fstream>
 #include <sstream>
-#include <string>
 #include <vector>
-#include <chrono>
-#include <algorithm>
-#include <numeric>
-#include <limits>
+#include <string>
 #include <random>
 #include <cmath>
-#include <omp.h>
-//#include "/opt/homebrew/Cellar/libomp/15.0.7/include/omp.h"
 
-using namespace std;
 
-vector<int> produce_list() {
-    constexpr int n_biostrat = 4522;
-    constexpr int pmag = 63;
+struct Horizon {
+    std::string section_name;
+    double horizon_score;
+    int section_number;
+    int horizon_number;
+    int horizon_height;
+    std::vector<int> presence_absence_data;
+};
 
-    vector<int> biostrat(n_biostrat);
-    std::iota(biostrat.begin(), biostrat.end(), 1);
+struct PenaltyParameters {
+    int n_biostrat;
+    std::vector<int> biostrat_columns;
 
-    int n_pmag = 0;
-    int n_dates = 0;
+    int n_pmag;
+    int pmag;
 
-    vector<vector<int>> dates{{109, 2, 110, 1, 100}, {111, 2, 112, 1, 100}, {113, 2, 114, 1, 100}};
-    int n_ashes = 0;
-    vector<vector<int>> ashes{{68, 100}, {69, 100}};
-    int n_continuous = 0;
-    vector<vector<int>> continuous{{70, 5}, {71, 5}};
+    int n_dates;
+    std::vector<std::vector<int>> dates;
 
-    vector<int> penalty_spec_62;
-    penalty_spec_62.reserve(n_biostrat + 4 + (dates.size() * 5) + 1 + (ashes.size() * 2) + 1 + (continuous.size() * 2));
+    int n_ashes;
+    std::vector<std::vector<int>> ashes;
 
-    penalty_spec_62.emplace_back(n_biostrat);
-    penalty_spec_62.insert(penalty_spec_62.end(), biostrat.begin(), biostrat.end());
-    penalty_spec_62.emplace_back(n_pmag);
-    penalty_spec_62.emplace_back(pmag);
-    penalty_spec_62.emplace_back(n_dates);
-    for (const auto& row : dates) {
-        penalty_spec_62.insert(penalty_spec_62.end(), row.begin(), row.end());
-    }
-    penalty_spec_62.emplace_back(n_ashes);
-    for (const auto& row : ashes) {
-        penalty_spec_62.insert(penalty_spec_62.end(), row.begin(), row.end());
-    }
-    penalty_spec_62.emplace_back(n_continuous);
-    for (const auto& row : continuous) {
-        penalty_spec_62.insert(penalty_spec_62.end(), row.begin(), row.end());
+    int n_continuous;
+    std::vector<std::vector<int>> continuous;
+};
+
+std::vector<Horizon> read_csv_data(const std::string& file_path) {
+    std::vector<Horizon> horizons;
+    std::ifstream file(file_path);
+
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open the file." << std::endl;
+        return horizons;
     }
 
-    return penalty_spec_62;
+    // Ignore the header line
+    std::string header_line;
+    std::getline(file, header_line);
+
+    std::string line;
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        std::string token;
+        Horizon horizon;
+
+        std::getline(ss, token, ',');
+        horizon.section_name = token;
+
+        std::getline(ss, token, ',');
+        horizon.horizon_score = std::stod(token);
+
+        std::getline(ss, token, ',');
+        horizon.section_number = std::stoi(token);
+
+        std::getline(ss, token, ',');
+        horizon.horizon_number = std::stoi(token);
+
+        std::getline(ss, token, ',');
+        horizon.horizon_height = std::stoi(token);
+
+        while (std::getline(ss, token, ',')) {
+            horizon.presence_absence_data.push_back(std::stoi(token));
+        }
+
+        horizons.push_back(horizon);
+    }
+
+    file.close();
+    return horizons;
 }
 
-bool compare_first_column(const std::vector<double>& a, const std::vector<double>& b) {
-    return a[0] < b[0];
+PenaltyParameters initialize_penalty_parameters() {
+    PenaltyParameters params;
+
+//    params.n_biostrat = 62;
+    params.n_biostrat = 4522;
+    for (int i = 1; i <= 62; ++i) {
+        params.biostrat_columns.push_back(i);
+    }
+
+    params.n_pmag = 0;
+    params.pmag = 63;
+
+    params.n_dates = 0;
+    params.dates = {
+        {109, 2, 110, 1, 100},
+        {111, 2, 112, 1, 100},
+        {113, 2, 114, 1, 100}
+    };
+
+    params.n_ashes = 0;
+    params.ashes = {
+        {68, 100},
+        {69, 100}
+    };
+
+    params.n_continuous = 0;
+    params.continuous = {
+        {70, 5},
+        {71, 5}
+    };
+
+    return params;
+}
+
+int calculate_penalty(const std::vector<Horizon>& horizons, int n_biostrat) {
+    int penalty = 0;
+
+    for (int column = 0; column < n_biostrat; ++column) {
+        bool first_one_found = false;
+        int first_one_index = 0;
+        int last_one_index = 0;
+
+        for (int row = 0; row < horizons.size(); ++row) {
+            int value = horizons[row].presence_absence_data[column];
+            if (value == 1) {
+                if (!first_one_found) {
+                    first_one_found = true;
+                    first_one_index = row;
+                }
+                last_one_index = row;
+            }
+        }
+
+        for (int row = first_one_index; row <= last_one_index; ++row) {
+            if (horizons[row].presence_absence_data[column] == 0) {
+                ++penalty;
+            }
+        }
+    }
+
+    return penalty;
 }
 
 
-int NetRangeExtension(const std::vector<std::vector<double>>& data) {
-    int total_sum = 0;
+void HorizonAnneal(std::vector<Horizon>& horizons, const PenaltyParameters& penalty_parameters, int nouter, int ninner, double temperature, double cooling) {
+    // Sort horizons by horizon_score
+    std::sort(horizons.begin(), horizons.end(), [](const Horizon& a, const Horizon& b) { return a.horizon_score < b.horizon_score; });
 
-    for (size_t j = 0; j < data[0].size(); ++j) { // 对每一列进行计算
-        int lp_begin = -1, lp_end = -1;
-        for (size_t i = 0; i < data.size(); ++i) {
-            if (lp_begin == -1 && data[i][j] == 1) {
-                lp_begin = i;
-            }
-            if (data[i][j] == 1) {
-                lp_end = i;
-            }
-        }
-        int column_sum = 0;
-        for (int i = lp_begin; i <= lp_end; ++i) {
-            if (data[i][j] == 0) {
-                column_sum++;
-            }
-        }
-        total_sum += column_sum;
+    // Calculate min and max horizon_score
+    double min_horizon_score = horizons.front().horizon_score;
+    double max_horizon_score = horizons.back().horizon_score;
+
+    // Normalize horizon_score for each horizon
+    for (Horizon& horizon : horizons) {
+        horizon.horizon_score = (horizon.horizon_score - min_horizon_score) / (max_horizon_score - min_horizon_score);
     }
-    return total_sum;
-}
-
-void HorizonAnneal(std::vector<std::vector<string>>& dataframe, int n_biostrat, vector<int> biostrat, int nouter = 400, int ninner = 100, double temperature = 5, double cooling = 0.9) {
-    const int data_offset = 4;
-    std::vector<std::string> columns = dataframe[0];
-    std::vector<std::vector<double>> d3(dataframe.size() - 1, std::vector<double>(dataframe[0].size()));
-
-    for (int i = 1; i < dataframe.size(); ++i) {
-        for (int j = 0; j < dataframe[i].size(); ++j) {
-            d3[i - 1][j] = std::stod(dataframe[i][j]);
+    
+    int initial_penalty = 0;
+    int best_penalty = 0;
+    if (penalty_parameters.n_biostrat > 0) {
+        initial_penalty = calculate_penalty(horizons, penalty_parameters.n_biostrat);
+    }
+    std::cout << "Initial penalty: " << initial_penalty << std::endl;
+    best_penalty = initial_penalty;
+    int num_sections = 0;
+    int num_horizons = horizons.size();
+    for (const Horizon& horizon : horizons) {
+        if (horizon.section_number > num_sections) {
+            num_sections = horizon.section_number;
         }
     }
-
-    std::sort(d3.begin(), d3.end(), compare_first_column);
-
-    double min_val = d3[0][0];
-    double max_val = d3.back()[0];
-    for (auto &row : d3) {
-        row[0] = (row[0] - min_val) / (max_val - min_val);
-    }
-
-    std::vector<double> movetrack(5, 0);
-    std::vector<double> movetry(5, 0);
-
-    double cv;
-    if (n_biostrat > 0) {
-        int col_index = biostrat[0] + data_offset - 1;
-        std::vector<std::vector<double>> d3_col(d3.size(), std::vector<double>(d3[0].size() - col_index));
-        for (int i = 0; i < d3.size(); ++i) {
-            std::copy(d3[i].begin() + col_index, d3[i].end(), d3_col[i].begin());
-        }
-        cv = NetRangeExtension(d3_col);
-    } else {
-        cv = 0;
-    }
-
-    double bestcv = cv;
-    std::cout << "----------Starting penalty----------\n" << std::endl;
-    std::cout << "current penalty: " << bestcv << std::endl;
-    std::vector<std::vector<double>> bestd3 = d3;
-    size_t nsections = (*std::max_element(d3.cbegin(), d3.cend(), [](const std::vector<double>& a, const std::vector<double>& b) { return a[1] < b[1]; }))[1];
-    size_t nhorizons = d3.size();
-
+    
+    // 初始化随机数生成器
     std::random_device rd;
-    std::mt19937 rng(rd());
-    std::uniform_real_distribution<double> dist_sec(1.000001, nsections + 0.99999);
-    std::uniform_real_distribution<double> dis(0.0, 1.0);
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(0.0, 1.0);
+    std::uniform_int_distribution<> dis_int(1, num_sections);
+    std::uniform_real_distribution<> dis_move(-0.1, 0.1);
+    std::uniform_real_distribution<> dis_scale(-0.05, 0.05);
+    std::uniform_real_distribution<> dis_gap(-0.59, 5.0);
+    std::vector<Horizon> d3 = horizons;
+
     for (int i = 0; i < nouter; ++i) {
-        #pragma omp parallel
-        {
-            std::vector<std::vector<double>> pd3;
-            #pragma omp single
-            pd3 = d3;
-            for (int j = 0; j < ninner; ++j) {
-                #pragma omp task firstprivate(pd3)
-                // in order to avoid race conditions.
-                std::mt19937 rng(std::chrono::steady_clock::now().time_since_epoch().count() + omp_get_thread_num());
-                int movetype;
-                std::vector<std::vector<double>> pd3_local = pd3;
-                double psec = static_cast<int>(std::floor(dist_sec(rng)));
-                double pmove = dis(rng);
-                if (pmove < 0.2) { // 向上/下移动
-                    double shval = std::uniform_real_distribution<double>{ -0.1, 0.1 }(rng);
-                    for (auto& row : pd3) {
-                        if (row[1] == psec) {
-                            row[0] += shval;
-                        }
+        for (int j = 0; j < ninner; ++j) {
+            std::vector<Horizon> pd3 = d3;
+            double pmove = dis(gen);
+            int psec = dis_int(gen);
+            // 向上/向下移动
+            if (pmove < 0.2) {
+                double random_move = dis_move(gen);
+                for (Horizon& horizon : pd3) {
+                    if (horizon.section_number == psec) {
+                        horizon.horizon_score += random_move;
                     }
-                    movetype = 1;
-                    ++movetry[0];
                 }
-                else if (pmove < 0.4) {  // 扩张/收缩
-                    double shval = std::uniform_real_distribution<double>{ -0.05, 0.05 }(rng)+1;
-                    double score_sum = 0;
-                    int count = 0;
-                    for (auto& row : pd3) {
-                        if (row[1] == psec) {
+            } else if (pmove < 0.4) {
+                // 扩张/收缩
+                double random_scale = dis_scale(gen) + 1.0;
+                double sum = 0.0;
+                int count = 0;
+                for (const Horizon& horizon : pd3) {
+                    if (horizon.section_number == psec) {
+                        sum += horizon.horizon_score;
+                        count++;
+                    }
+                }
+                double avg = sum / count;
+                for (Horizon& horizon : pd3) {
+                    if (horizon.section_number == psec) {
+                        horizon.horizon_score = (horizon.horizon_score - avg) * random_scale + avg;
+                    }
+                }
+            } else if (pmove < 0.6) {
+                // 插入/移除gap
+                int count = 0;
+                for (const Horizon& horizon : pd3) {
+                    if (horizon.section_number == psec) {
+                        count++;
+                    }
+                }
+                while (count < 3) {
+                    psec = dis_int(gen);
+                    count = 0;
+                    for (const Horizon& horizon : pd3) {
+                        if (horizon.section_number == psec) {
                             count++;
-                            score_sum += row[0];
                         }
                     }
-                    double pd3min = score_sum / count;
-                    for (auto& row : pd3) {
-                        if (row[1] == psec) {
-                            row[0] = (row[0] - pd3min) * shval + pd3min;
-                        }
-                    }
-                    movetype = 2;
-                    ++movetry[1];
                 }
-                else if (pmove < 0.6) {  // 插入/移除gap
-                    std::vector<bool> ps(pd3.size(), false);
-                    for (int i = 0; i < pd3.size(); ++i) {
-                        if (pd3[i][1] == psec) {
-                            ps[i] = true;
+                std::uniform_int_distribution<> dis_breakpoint(2, count - 1);
+                int breakpoint = dis_breakpoint(gen);
+
+                double gap = 0.0;
+                int current_count = 0;
+                for (int k = 0; k < pd3.size(); ++k) {
+                    if (pd3[k].section_number == psec) {
+                        current_count++;
+                        if (current_count == breakpoint + 1) {
+                            gap = (pd3[k].horizon_score - pd3[k - 1].horizon_score) * dis_gap(gen);
+                            break;
                         }
                     }
-                    while (std::count(ps.begin(), ps.end(), true) < 3) {
-                        psec = std::floor(std::uniform_real_distribution<double>(1.000001, nsections + 0.99999)(rng));
-                        for (int i = 0; i < pd3.size(); ++i) {
-                            if (pd3[i][1] == psec) {
-                                ps[i] = true;
-                            }
-                        }
-                    }
-                    int sum_ps = std::count(ps.begin(), ps.end(), true);
-                    int breakpoint = std::floor(std::uniform_real_distribution<double>(2, sum_ps - 0.001)(rng));
-                    std::vector<int> w;
-                    for (int i = 0; i < ps.size(); ++i) {
-                        if (ps[i]) {
-                            w.push_back(i);
-                        }
-                    }
-                    double pd3_breakpoint_prev = pd3[w[breakpoint - 1]][0];
-                    double pd3_breakpoint = pd3[w[breakpoint]][0];
-                    double gap = std::uniform_real_distribution<double>(-0.59, 5)(rng) * (pd3_breakpoint - pd3_breakpoint_prev);
-                    for (int i = 0; i < w.size(); ++i) {
-                        pd3[w[i]][0] += gap;
-                    }
-                    movetype = 3;
-                    ++movetry[2];
                 }
-                else if (pmove < 0.8) {
-                    double shval = std::uniform_real_distribution<double>{ -0.1, 0.1 }(rng)+1;
-                    std::vector<bool> ps(pd3.size());
+                current_count = 0;
+                for (Horizon& horizon : pd3) {
+                    if (horizon.section_number == psec) {
+                        current_count++;
+                        if (current_count <= breakpoint + 1) {
+                            horizon.horizon_score += gap;
+                        }
+                    }
+                }
+            } else if (pmove < 0.8) {
+                // dogleg
+                double shval = dis_move(gen) + 1.0;
+                std::vector<bool> ps(pd3.size());
+                for (size_t i = 0; i < pd3.size(); ++i) {
+                    ps[i] = pd3[i].section_number == psec;
+                }
+                while (std::count(ps.begin(), ps.end(), true) < 3) {
+                    psec = dis_int(gen);
                     for (size_t i = 0; i < pd3.size(); ++i) {
-                        ps[i] = pd3[i][1] == psec;
+                        ps[i] = pd3[i].section_number == psec;
                     }
-                    while (std::count(ps.begin(), ps.end(), true) < 3) {
-                        psec = std::floor(std::uniform_real_distribution<double>{1.000001, nsections + 0.99999}(rng));
-                        for (size_t i = 0; i < pd3.size(); ++i) {
-                            ps[i] = pd3[i][1] == psec;
-                        }
+                }
+                std::vector<size_t> w;
+                for (size_t i = 0; i < ps.size(); ++i) {
+                    if (ps[i]) {
+                        w.push_back(i);
                     }
-                    std::vector<size_t> w;
-                    for (size_t i = 0; i < ps.size(); ++i) {
-                        if (ps[i]) {
-                            w.push_back(i);
-                        }
+                }
+                std::uniform_int_distribution<> dis_breakpt(2, static_cast<double>(w.size()) - 1);
+                int breakpt = dis_breakpt(gen);
+                std::vector<double> gapval(w.size() - 1);
+                for (size_t i = 0; i < gapval.size(); ++i) {
+                    gapval[i] = pd3[w[i + 1]].horizon_score - pd3[w[i]].horizon_score;
+                }
+                double upchoice = dis(gen);
+                if (upchoice > 0.5) {
+                    for (size_t i = breakpt; i < w.size() - 1; ++i) {
+                        gapval[i] *= shval;
                     }
-                    size_t breakpt = std::floor(std::uniform_real_distribution<double>{2, static_cast<double>(w.size()) - 0.001}(rng));
-                    std::vector<double> gapval(w.size() - 1);
-                    for (size_t i = 0; i < gapval.size(); ++i) {
-                        gapval[i] = pd3[w[i + 1]][0] - pd3[w[i]][0];
-                    }
-                    double upchoice = std::uniform_real_distribution<double>{ 0, 1 }(rng);
-                    if (upchoice > 0.5) {
-                        for (size_t i = breakpt; i < w.size() - 1; ++i) {
-                            gapval[i] *= shval;
-                        }
-                    }
-                    else {
-                        for (size_t i = 0; i < breakpt; ++i) {
-                            gapval[i] *= shval;
-                        }
-                    }
-                    std::vector<double> newval(w.size());
-                    newval[0] = pd3[w[0]][0];
-                    for (size_t i = 1; i < newval.size(); ++i) {
-                        newval[i] = newval[i - 1] + gapval[i - 1];
-                    }
-                    for (size_t i = 0; i < w.size(); ++i) {
-                        pd3[w[i]][0] = newval[i];
-                    }
-                    movetype = 4;
-                    ++movetry[3];
                 }
                 else {
-                    double target = std::floor(std::uniform_real_distribution<double>(1.000001, nhorizons + 0.99)(rng));
-                    int dmove = std::floor(std::uniform_real_distribution<double>(0.01, 1.99)(rng));
-                    int nmove = std::ceil(std::abs(std::normal_distribution<double>(0, 4)(rng)));
-                    nmove = 1;
-                    int movetype = 5;
-                    movetry[4] += 1;
-                    if (dmove == 0) {
-                        double startsection = pd3[target - 1][1];
-                        while (nmove > 0) {
-                            if (target == nhorizons) {
+                    for (size_t i = 0; i < breakpt; ++i) {
+                        gapval[i] *= shval;
+                    }
+                }
+                std::vector<double> newval(w.size());
+                newval[0] = pd3[w[0]].horizon_score;
+                for (size_t i = 1; i < newval.size(); ++i) {
+                    newval[i] = newval[i - 1] + gapval[i - 1];
+                }
+                for (size_t i = 0; i < w.size(); ++i) {
+                    pd3[w[i]].horizon_score = newval[i];
+                }
+            } else {
+                // 插入乱序程序的策略
+                std::uniform_int_distribution<> dis_target(1, num_horizons);
+                int target = dis_target(gen);
+                std::uniform_int_distribution<> dis_dmove(0, 1);
+                int dmove = dis_dmove(gen);
+                int nmove = std::ceil(std::abs(std::normal_distribution<double>(0, 4)(gen)));
+                nmove = 1;
+
+                if (dmove == 0) {
+                    int startsection = pd3[target - 1].section_number;
+                    while (nmove > 0) {
+                        if (target == num_horizons) {
+                            nmove = 0;
+                        } else {
+                            if (pd3[target].section_number == startsection) {
                                 nmove = 0;
-                            }
-                            else {
-                                if (pd3[target][1] == startsection) {
-                                    nmove = 0;
-                                }
-                                else {
-                                    double temp = pd3[target][0];
-                                    pd3[target][0] = pd3[target - 1][0];
-                                    pd3[target - 1][0] = temp;
-                                    target += 1;
-                                    nmove -= 1;
-                                }
+                            } else {
+                                double temp = pd3[target].horizon_score;
+                                pd3[target].horizon_score = pd3[target - 1].horizon_score;
+                                pd3[target - 1].horizon_score = temp;
+                                target += 1;
+                                nmove -= 1;
                             }
                         }
                     }
-                    else {
-                        while (nmove > 0) {
-                            if (target == 1) {
-                                nmove = 0;
-                            }
-                            else {
-                                if (pd3[target - 2][1] == pd3[target - 1][1]) {
-                                    target -= 1;
-                                }
-                                else {
-                                    double temp = pd3[target - 2][0];
-                                    pd3[target - 2][0] = pd3[target - 1][0];
-                                    pd3[target - 1][0] = temp;
-                                    target -= 1;
-                                    nmove -= 1;
-                                }
+                } else {
+                    while (nmove > 0) {
+                        if (target == 1) {
+                            nmove = 0;
+                        } else {
+                            if (pd3[target - 2].section_number == pd3[target - 1].section_number) {
+                                target -= 1;
+                            } else {
+                                double temp = pd3[target - 2].horizon_score;
+                                pd3[target - 2].horizon_score = pd3[target - 1].horizon_score;
+                                pd3[target - 1].horizon_score = temp;
+                                target -= 1;
+                                nmove -= 1;
                             }
                         }
                     }
-                }
-
-                std::sort(pd3.begin(), pd3.end(),compare_first_column);
-                if (n_biostrat > 0) {
-                    int col_index = biostrat[0] + data_offset - 1;
-                    std::vector<std::vector<double>> pd3_col(pd3.size(), std::vector<double>(pd3[0].size() - col_index));
-                    for (int k = 0; k < pd3.size(); ++k) {
-                        std::copy(pd3[k].begin() + col_index, pd3[k].end(), pd3_col[k].begin());
-                    }
-                    cv = NetRangeExtension(pd3_col);
-                } else {
-                    cv = 0;
-                }
-
-                double delta = cv - bestcv;
-                if (delta < 0 || dis(rng) < std::exp(-delta / temperature)) {
-                    d3 = pd3;
-                    bestcv = cv;
-                    movetrack[movetype] += 1;
-                } else {
-                    movetry[movetype] += 1;
-                }
-                #pragma omp critical
-                {
-                    pd3 = pd3_local;
                 }
             }
-            #pragma omp single
-            {
+            // Sort horizons by horizon_score
+            std::sort(pd3.begin(), pd3.end(), [](const Horizon& a, const Horizon& b) { return a.horizon_score < b.horizon_score; });
+            int current_penalty = 0;
+            if (penalty_parameters.n_biostrat > 0) {
+                current_penalty = calculate_penalty(pd3, penalty_parameters.n_biostrat);
+            }
+            if (current_penalty <= best_penalty) {
+                if (current_penalty < best_penalty) {
+                    // std::cout << "best penalty: " << current_penalty << std::endl;
+                }
                 d3 = pd3;
+                best_penalty = current_penalty;
+                initial_penalty = current_penalty;
+            } else {
+                double pch = std::uniform_real_distribution<double>{ 0.0, 1.0 }(gen);
+                if (pch < exp(-(current_penalty - best_penalty) / temperature)) {
+                    d3 = pd3;
+                    initial_penalty = current_penalty;
+                } else {
+                    pd3 = d3;
+                }
             }
+            size_t numRows = horizons.size();
+            for (size_t i = 0; i < numRows; ++i) {
+                horizons[i].horizon_score = static_cast<double>(i) / static_cast<double>(numRows);
+            }
+
         }
         temperature *= cooling;
-        std::cout << "N outer: " << i << " | T: " << temperature << " | Best pen: " << bestcv << " \n";
+        std::cout << "N outer: " << i << " | T: " << temperature << " | Best pen: " << best_penalty << " \n";
     }
-
-    std::vector<std::vector<std::string>> result(d3.size() + 1, std::vector<std::string>(columns.size()));
-    result[0] = columns;
-    for (int i = 0; i < d3.size(); ++i) {
-        for (int j = 0; j < d3[i].size(); ++j) {
-            result[i + 1][j] = std::to_string(d3[i][j]);
-        }
-    }
-
-    dataframe = result;
 }
 
 int main() {
     auto start = std::chrono::high_resolution_clock::now();
-    string filename = "/Users/qianxian/PycharmProjects/HA/dataset/Horizon_Data_sigmoid_for_HA.csv";
-//    string filename = "Horizon_Data_sigmoid_for_HA.csv";
-    ifstream file(filename, ios::binary);
-
-    if (!file.is_open()) {
-        cerr << "Error opening file\n";
-        return 1;
-    }
-    vector<vector<string>> data;
-    string line;
-    while (getline(file, line)) {
-        stringstream ss(line);
-        vector<string> row;
-
-        string cell;
-        getline(ss, cell, ',');
-        while (ss.good()) {
-            getline(ss, cell, ',');
-            row.push_back(cell);
-        }
-
-        data.push_back(row);
-    }
-
-    file.close();
-    vector<int> penalty_spec_62 = produce_list();
-    int n_biostrat = penalty_spec_62[0];
-    vector<int> biostrat(n_biostrat);
-    for (int i = 0; i < n_biostrat; i++) {
-        biostrat[i] = penalty_spec_62[i + 1];
-    }
-    HorizonAnneal(data, n_biostrat, biostrat);
+    
+    const std::string file_path = "/Users/qianxian/PycharmProjects/HA/dataset/Horizon_Data_sigmoid_for_HA.csv";
+    std::vector<Horizon> horizons = read_csv_data(file_path);
+    PenaltyParameters penalty_parameters = initialize_penalty_parameters();
+    
+    int nouter = 400;
+    int ninner = 100;
+    double temperature = 5.0;
+    double cooling = 0.50;
+    HorizonAnneal(horizons, penalty_parameters, nouter, ninner, temperature, cooling);
+    
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
     std::cout << "\nElapsed time: " << elapsed.count() << " seconds." << std::endl;
