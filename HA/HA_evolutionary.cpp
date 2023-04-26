@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <vector>
 #include <cmath>
 #include <random>
@@ -122,7 +122,7 @@ PenaltyParameters initialize_penalty_parameters() {
     PenaltyParameters params;
 
     params.n_biostrat = 62;
-    //    params.n_biostrat = 4522;
+    // params.n_biostrat = 4522;
     for (int i = 1; i <= 62; ++i) {
         params.biostrat_columns.push_back(i);
     }
@@ -336,6 +336,7 @@ std::vector<Horizon> HorizonAnneal(std::vector<Horizon>& horizons, const Penalty
             best_fitness = chromosome.fitness;
         }
     }
+    std::cout << "Starting penalty: " << best_fitness << "" << std::endl;
 
     // 遗传算法主循环
     for (int i = 0; i < num_generations; ++i) {
@@ -429,7 +430,7 @@ int main() {
     PenaltyParameters penalty_parameters = initialize_penalty_parameters();
 
     int num_generations = 1000; // outer_num
-    int population_size = 500; // inner_num
+    int population_size = 1000; // inner_num
 
     double crossover_rate = 0.99;
     double mutation_rate = 0.99;
